@@ -535,6 +535,48 @@ test('refresh failure re-derives stale state with the advancing clock without re
   assert.deepEqual(chartInstances.map((chart) => chart.updateCount), [0, 0]);
 });
 
+test('refresh failure preserves the chart fallback surface while updating stale content', async () => {
+  const { controllerApi } = loadControllerRuntime();
+  const documentRef = makeFakeDocument();
+  let shouldFail = false;
+  const controller = controllerApi.createDashboardController({
+    document: documentRef,
+    fetch: async () => {
+      if (shouldFail) throw new Error('offline');
+      return {
+        ok: true,
+        text: async () => [
+          'time,num,unit',
+          '2026-08-28T17:00:00,99.51,度',
+          '2026-08-28T18:00:00,98.51,度',
+        ].join('\n'),
+      };
+    },
+    Chart: null,
+    now: () => Date.parse('2026-08-28T18:10:00+08:00'),
+  });
+
+  await controller.refreshDashboard();
+  const before = ['balance', 'consumption'].map((name) => ({
+    canvasHidden: documentRef.getElementById(`${name}-chart`).hidden,
+    emptyHidden: documentRef.getElementById(`${name}-chart-empty`).hidden,
+    emptyText: documentRef.getElementById(`${name}-chart-empty`).textContent,
+  }));
+  shouldFail = true;
+  await controller.refreshDashboard();
+  const after = ['balance', 'consumption'].map((name) => ({
+    canvasHidden: documentRef.getElementById(`${name}-chart`).hidden,
+    emptyHidden: documentRef.getElementById(`${name}-chart-empty`).hidden,
+    emptyText: documentRef.getElementById(`${name}-chart-empty`).textContent,
+  }));
+
+  assert.deepEqual(before, [
+    { canvasHidden: true, emptyHidden: false, emptyText: '图表组件加载失败' },
+    { canvasHidden: true, emptyHidden: false, emptyText: '图表组件加载失败' },
+  ]);
+  assert.deepEqual(after, before);
+});
+
 test('refresh error banner includes its failed Beijing timestamp', async () => {
   const { controllerApi } = loadControllerRuntime();
   const documentRef = makeFakeDocument();

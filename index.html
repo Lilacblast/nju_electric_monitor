@@ -759,16 +759,18 @@
       renderRechargeEvents(documentRef, options.rechargeEvents || []);
       renderComparisons(documentRef, options.consumption24h);
 
-      const chartEmptyText = model.chartState === 'chart-error' ? '图表组件加载失败' : '至少需要两次采样';
-      const chartReady = model.chartState === 'ready' && model.state === 'ready';
-      ['balance-chart', 'consumption-chart'].forEach((id) => {
-        const canvas = getElement(documentRef, id);
-        if (canvas) canvas.hidden = !chartReady;
-      });
-      ['balance-chart-empty', 'consumption-chart-empty'].forEach((id) => {
-        const empty = setText(documentRef, id, chartEmptyText);
-        if (empty) empty.hidden = chartReady;
-      });
+      if (!options.preserveChartSurface) {
+        const chartEmptyText = model.chartState === 'chart-error' ? '图表组件加载失败' : '至少需要两次采样';
+        const chartReady = model.chartState === 'ready' && model.state === 'ready';
+        ['balance-chart', 'consumption-chart'].forEach((id) => {
+          const canvas = getElement(documentRef, id);
+          if (canvas) canvas.hidden = !chartReady;
+        });
+        ['balance-chart-empty', 'consumption-chart-empty'].forEach((id) => {
+          const empty = setText(documentRef, id, chartEmptyText);
+          if (empty) empty.hidden = chartReady;
+        });
+      }
       return model;
     }
 
@@ -1166,6 +1168,7 @@
               document: documentRef,
               rechargeEvents: failureStats.rechargeEvents,
               consumption24h: model.stats.day24.value === '—' ? null : failureStats.consumption24h,
+              preserveChartSurface: true,
             });
           }
           renderError(error, documentRef, failureTimestamp);

@@ -37,3 +37,25 @@ git diff --check
 - The new tests distinguish chart samples that differ only by seconds and advance the fake clock across the freshness threshold.
 
 Commit SHA: the single commit created from this report (`fix: keep stale-state timing honest after refresh failures`).
+
+## Final review fix round 2
+
+### RED
+
+Added a regression test with two preserved records and `Chart: null`. The test captured the chart fallback surface before a failed refresh and asserted that both canvas visibility and fallback text remained unchanged afterward. It failed as expected: the failure-path `renderDashboard` changed `图表组件加载失败`/hidden canvases to the normal insufficient-data surface.
+
+### GREEN
+
+Added the minimal `preserveChartSurface` render option. The refresh failure path uses it while still re-rendering all non-chart stale-state content; existing Chart instances and the Chart.js-unavailable fallback surface are left untouched.
+
+Verification:
+
+```text
+node --test tests/dashboard-core.test.mjs --test-name-pattern="chart fallback surface"
+30 passed, 0 failed
+node --test tests/dashboard-core.test.mjs
+30 passed, 0 failed
+git diff --check
+```
+
+Self-review: only `index.html`, `tests/dashboard-core.test.mjs`, and this report changed; no crawler, workflow, data, or unrelated documentation files were touched. Final fix SHA: appended in the commit carrying this round (`fix: preserve chart surfaces across refresh failures`).
