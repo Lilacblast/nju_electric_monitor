@@ -198,7 +198,7 @@
           <span id="balance-value" class="balance-value">—</span>
           <span id="balance-unit" class="balance-unit">度</span>
         </div>
-        <p class="updated">北京时间 <time id="updated-at">—</time> 更新</p>
+        <p class="updated">北京时间 <time id="updated-at" datetime="">—</time> 更新</p>
       </div>
       <div class="hero-side">
         <div class="side-block">
@@ -506,6 +506,8 @@
           balance: '—',
           unit: '度',
           updatedAt: '—',
+          updatedAtISO: null,
+          updatedAtTimeMs: null,
           freshness: 'normal',
           balanceLevel: 'normal',
           status: { text: '等待第一次采集', detail: '暂无电量记录' },
@@ -557,12 +559,15 @@
         unit: latest.unit,
         updatedAt: new Intl.DateTimeFormat('zh-CN', {
           timeZone: 'Asia/Shanghai',
+          year: 'numeric',
           month: 'numeric',
           day: 'numeric',
           hour: '2-digit',
           minute: '2-digit',
           hour12: false,
         }).format(new Date(latest.timeMs)),
+        updatedAtISO: new Date(latest.timeMs).toISOString(),
+        updatedAtTimeMs: latest.timeMs,
         freshness,
         balanceLevel,
         status: freshnessCopy,
@@ -615,6 +620,21 @@
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
+        hour12: false,
+      }).format(new Date(timeMs));
+    }
+
+    function formatChartDateTime(value) {
+      const timeMs = Number(value);
+      if (!Number.isFinite(timeMs)) return '—';
+      return new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
         hour12: false,
       }).format(new Date(timeMs));
     }
@@ -702,7 +722,12 @@
 
       setText(documentRef, 'balance-value', model.balance);
       setText(documentRef, 'balance-unit', model.unit || '度');
-      setText(documentRef, 'updated-at', model.updatedAt || '—');
+      const updatedAt = setText(documentRef, 'updated-at', model.updatedAt || '—');
+      if (updatedAt) {
+        const machineTime = model.updatedAtISO || '';
+        updatedAt.dateTime = machineTime;
+        if (typeof updatedAt.setAttribute === 'function') updatedAt.setAttribute('datetime', machineTime);
+      }
       setText(documentRef, 'forecast-value', model.predictionText || '数据不足');
       setText(documentRef, 'freshness-text', model.status?.text || '等待采集');
       setText(documentRef, 'freshness-detail', model.status?.detail || '每小时自动更新');
@@ -752,11 +777,11 @@
       return renderDashboard(createDashboardModel([], [], Date.now()), { document: target });
     }
 
-    function renderError(error, documentRef = null) {
+    function renderError(error, documentRef = null, timestamp = Date.now()) {
       const target = documentRef || (typeof document !== 'undefined' ? document : null);
       const banner = getElement(target, 'error-banner');
       if (banner) {
-        banner.textContent = '数据读取失败';
+        banner.textContent = `数据读取失败 · ${formatDateTime(timestamp)}`;
         banner.hidden = false;
       }
       return error;
@@ -885,7 +910,8 @@
         const lineTooltip = {
           callbacks: {
             title(items) {
-              return items[0] ? `北京时间 ${data.labels[items[0].dataIndex]}` : '';
+              const record = data.filteredRecords[items[0]?.dataIndex];
+              return record ? `北京时间 ${formatChartDateTime(record.timeMs)}` : '';
             },
             label(context) {
               if (context.datasetIndex === 1) {
@@ -959,7 +985,7 @@
             title(items) {
               const interval = data.filteredIntervals[items[0]?.dataIndex];
               return interval
-                ? `${formatDateTime(interval.startTimeMs)} — ${formatDateTime(interval.endTimeMs)}`
+                ? `${formatChartDateTime(interval.startTimeMs)} — ${formatChartDateTime(interval.endTimeMs)}`
                 : '';
             },
             label(context) {
@@ -1131,7 +1157,18 @@
           }
           return { ...next, preserved: false };
         } catch (error) {
-          renderError(error, documentRef);
+          const failureTimestamp = nowMs();
+          if (records.length > 0) {
+            intervals = deriveIntervals(records);
+            model = createDashboardModel(records, intervals, failureTimestamp, skippedCount);
+            const failureStats = calculateStats(records, intervals, failureTimestamp);
+            renderDashboard(model, {
+              document: documentRef,
+              rechargeEvents: failureStats.rechargeEvents,
+              consumption24h: model.stats.day24.value === '—' ? null : failureStats.consumption24h,
+            });
+          }
+          renderError(error, documentRef, failureTimestamp);
           return {
             error,
             records,
@@ -1207,6 +1244,7 @@
     });
     globalThis.NJUPowerUI = Object.freeze({
       formatBalance,
+      formatChartDateTime,
       formatDateTime,
       formatDuration,
       formatKWh,

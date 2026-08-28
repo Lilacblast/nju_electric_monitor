@@ -280,6 +280,24 @@ test('a single record shows its real balance without inventing derived statistic
   assert.equal(model.chartState, 'insufficient');
 });
 
+test('ready models expose a year-qualified update and machine-readable timestamp', () => {
+  const core = loadCore();
+  const ui = loadUI();
+  const records = makeRecords(core, [['2026-08-28T17:15:28.912692', 99.51]]);
+  const model = core.createDashboardModel(
+    records,
+    [],
+    core.parseBeijingTime('2026-08-28T18:00:00'),
+  );
+  const documentRef = makeFakeDocument();
+
+  ui.renderDashboard(model, { document: documentRef });
+
+  assert.match(model.updatedAt, /^2026\/8\/28 17:15/u);
+  assert.equal(model.updatedAtISO, new Date(records[0].timeMs).toISOString());
+  assert.equal(documentRef.getElementById('updated-at').dateTime, model.updatedAtISO);
+});
+
 test('low balance warning includes a forecast only when prediction is valid', () => {
   const core = loadCore();
   const records = makeRecords(core, [
@@ -467,6 +485,75 @@ test('refresh failure preserves the last successful dashboard state', async () =
   assert.equal(documentRef.getElementById('error-banner').hidden, false);
 });
 
+test('refresh failure re-derives stale state with the advancing clock without rebuilding charts', async () => {
+  const { controllerApi } = loadControllerRuntime();
+  const documentRef = makeFakeDocument();
+  const chartInstances = [];
+  let shouldFail = false;
+  let currentNow = Date.parse('2026-08-28T18:10:00+08:00');
+  class FakeChart {
+    constructor(canvas, config) {
+      this.canvas = canvas;
+      this.data = config.data;
+      this.options = config.options;
+      this.updateCount = 0;
+      chartInstances.push(this);
+    }
+
+    update() {
+      this.updateCount += 1;
+    }
+  }
+
+  const controller = controllerApi.createDashboardController({
+    document: documentRef,
+    fetch: async () => {
+      if (shouldFail) throw new Error('offline');
+      return {
+        ok: true,
+        text: async () => [
+          'time,num,unit',
+          '2026-08-28T17:00:00,99.51,度',
+          '2026-08-28T18:00:00,98.51,度',
+        ].join('\n'),
+      };
+    },
+    Chart: FakeChart,
+    now: () => currentNow,
+  });
+
+  await controller.refreshDashboard();
+  shouldFail = true;
+  currentNow = Date.parse('2026-08-29T01:00:00+08:00');
+  const result = await controller.refreshDashboard();
+
+  assert.equal(result.preserved, true);
+  assert.equal(controller.getState().model.freshness, 'danger');
+  assert.equal(documentRef.getElementById('freshness-text').textContent, '采集异常');
+  assert.equal(documentRef.getElementById('balance-value').textContent, '98.51');
+  assert.equal(chartInstances.length, 2);
+  assert.deepEqual(chartInstances.map((chart) => chart.updateCount), [0, 0]);
+});
+
+test('refresh error banner includes its failed Beijing timestamp', async () => {
+  const { controllerApi } = loadControllerRuntime();
+  const documentRef = makeFakeDocument();
+  const failedAt = Date.parse('2026-08-28T23:30:45+08:00');
+  const controller = controllerApi.createDashboardController({
+    document: documentRef,
+    fetch: async () => { throw new Error('offline'); },
+    Chart: null,
+    now: () => failedAt,
+  });
+
+  await controller.refreshDashboard();
+
+  assert.equal(
+    documentRef.getElementById('error-banner').textContent,
+    '数据读取失败 · 2026/8/28 23:30',
+  );
+});
+
 test('comparisons stay unavailable when a single record has no completed consumption interval', async () => {
   const { controllerApi } = loadControllerRuntime();
   const documentRef = makeFakeDocument();
@@ -569,4 +656,36 @@ test('chart controller reuses both chart instances and exposes recharge and load
   assert.equal(documentRef.getElementById('range-24h').ariaPressed, 'false');
   assert.equal(controller.setRange('all'), 'all');
   assert.equal(chartInstances.length, 2);
+});
+
+test('chart tooltip titles use a seconds-precise Beijing formatter', () => {
+  const { controllerApi } = loadControllerRuntime();
+  const ui = loadUI();
+  const documentRef = makeFakeDocument();
+  const chartInstances = [];
+  class FakeChart {
+    constructor(canvas, config) {
+      this.data = config.data;
+      this.options = config.options;
+      chartInstances.push(this);
+    }
+
+    update() {}
+  }
+  const controller = controllerApi.createDashboardController({ document: documentRef, Chart: FakeChart });
+  const core = loadCore();
+  const records = makeRecords(core, [
+    ['2026-08-28T16:00:01', 20],
+    ['2026-08-28T17:00:02', 19],
+    ['2026-08-28T18:00:03', 18],
+  ]);
+
+  controller.updateCharts(records, core.deriveIntervals(records));
+
+  const lineTitle = chartInstances[0].options.plugins.tooltip.callbacks.title;
+  const barTitle = chartInstances[1].options.plugins.tooltip.callbacks.title;
+  assert.match(ui.formatChartDateTime(records[0].timeMs), /16:00:01/u);
+  assert.match(lineTitle([{ dataIndex: 0 }]), /北京时间 2026\/8\/28 16:00:01/u);
+  assert.notEqual(lineTitle([{ dataIndex: 0 }]), lineTitle([{ dataIndex: 1 }]));
+  assert.match(barTitle([{ dataIndex: 0 }]), /16:00:01 — 2026\/8\/28 17:00:02/u);
 });
