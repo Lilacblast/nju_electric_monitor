@@ -49,7 +49,7 @@ test('normalizes, deduplicates, and sorts CSV records', () => {
 
 - [ ] **Step 2: Run the test and verify RED**
 
-Run: `node --test tests/dashboard-core.test.mjs`  
+Run: `node --test tests/dashboard-core.test.mjs`
 Expected: FAIL because `index.html` or `NJUPowerCore` is missing.
 
 - [ ] **Step 3: Add the smallest complete inline core**
@@ -66,7 +66,7 @@ globalThis.NJUPowerCore = Object.freeze({
 
 - [ ] **Step 4: Run the test and verify GREEN**
 
-Run: `node --test tests/dashboard-core.test.mjs`  
+Run: `node --test tests/dashboard-core.test.mjs`
 Expected: all parser/normalization tests pass.
 
 - [ ] **Step 5: Commit the core**
@@ -103,7 +103,7 @@ assert.deepEqual(pick(core.deriveIntervals(records20to687)[0]), {
 
 - [ ] **Step 2: Verify the new tests fail**
 
-Run: `node --test tests/dashboard-core.test.mjs`  
+Run: `node --test tests/dashboard-core.test.mjs`
 Expected: FAIL because interval/stat functions are absent.
 
 - [ ] **Step 3: Implement interval derivation**
@@ -120,7 +120,7 @@ Calculate recent interval, 24h total, today total, seven-day rate, projected day
 
 - [ ] **Step 6: Run all tests and commit**
 
-Run: `node --test tests/dashboard-core.test.mjs`  
+Run: `node --test tests/dashboard-core.test.mjs`
 Expected: all tests pass.
 
 ```bash
@@ -144,7 +144,7 @@ Assert `index.html` contains viewport metadata, the required section IDs, four r
 
 - [ ] **Step 2: Verify static-contract tests fail**
 
-Run: `node --test tests/dashboard-core.test.mjs`  
+Run: `node --test tests/dashboard-core.test.mjs`
 Expected: FAIL on missing production sections/styles.
 
 - [ ] **Step 3: Implement semantic markup and B-direction CSS**
@@ -157,7 +157,7 @@ Add `formatBalance`, `formatKWh`, `formatDateTime`, `formatDuration`, `formatPow
 
 - [ ] **Step 5: Run tests and commit**
 
-Run: `node --test tests/dashboard-core.test.mjs`  
+Run: `node --test tests/dashboard-core.test.mjs`
 Expected: all tests pass.
 
 ```bash
@@ -181,7 +181,7 @@ Assert cache-busted CSV URL, `cache: 'no-store'`, `300000` millisecond refresh, 
 
 - [ ] **Step 2: Verify controller tests fail**
 
-Run: `node --test tests/dashboard-core.test.mjs`  
+Run: `node --test tests/dashboard-core.test.mjs`
 Expected: FAIL on absent fetch/refresh controller.
 
 - [ ] **Step 3: Pin Chart.js and implement chart lifecycle**
@@ -194,7 +194,7 @@ Fetch CSV immediately and every five minutes. Update `aria-pressed` when the ran
 
 - [ ] **Step 5: Run tests and commit**
 
-Run: `node --test tests/dashboard-core.test.mjs`  
+Run: `node --test tests/dashboard-core.test.mjs`
 Expected: all tests pass.
 
 ```bash
@@ -215,7 +215,7 @@ git commit -m "feat: add dashboard charts and automatic refresh"
 
 - [ ] **Step 1: Serve the repository locally**
 
-Run: `python -m http.server 8765 --bind 127.0.0.1`  
+Run: `python -m http.server 8765 --bind 127.0.0.1`
 Open: `http://127.0.0.1:8765/`.
 
 - [ ] **Step 2: Verify the real one-record state**
@@ -259,15 +259,15 @@ git commit -m "chore: finalize GitHub Pages dashboard"
 
 - [ ] **Step 1: Verify workflow isolation**
 
-Run: `git diff origin/master -- .github/workflows/auto_monitor_schedule.yml src/`  
+Run: `git diff origin/master -- .github/workflows/auto_monitor_schedule.yml src/`
 Expected: no output.
 
 - [ ] **Step 2: Verify final repository state and history**
 
-Run: `git status --short --branch` and `git log --oneline -8`.  
+Run: `git status --short --branch` and `git log --oneline -8`.
 Expected: no unintended files; commits describe spec, core, UI, charts, and final QA.
 
 - [ ] **Step 3: Push only after all checks pass**
 
-Run: `git push origin master`  
+Run: `git push origin master`
 Expected: successful update. If GitHub Pages is not already configured, report the one required manual setting: `Settings → Pages → Deploy from a branch → master → /(root)`.
