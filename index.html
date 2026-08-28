@@ -226,8 +226,105 @@
       return 'critical';
     }
 
+    function formatFixed(value, digits = 2) {
+      return Number.isFinite(value) ? value.toFixed(digits) : '—';
+    }
+
+    function createDashboardModel(records, intervals, nowMs = Date.now(), skippedCount = 0) {
+      if (records.length === 0) {
+        return {
+          state: 'empty',
+          balance: '—',
+          unit: '度',
+          updatedAt: '—',
+          freshness: 'normal',
+          balanceLevel: 'normal',
+          status: { text: '等待第一次采集', detail: '暂无电量记录' },
+          alert: { text: '暂无电量记录', detail: '等待第一次采集' },
+          predictionText: '数据不足',
+          chartState: 'insufficient',
+          skippedCount,
+          stats: {
+            recent: { label: '最近采样区间', value: '—', note: '至少需要两次采样' },
+            day24: { label: '近 24 小时', value: '—', note: '数据不足' },
+            day: { label: '今日耗电', value: '—', note: '数据不足' },
+            prediction: { label: '预计可用', value: '—', note: '数据不足' },
+          },
+        };
+      }
+
+      const stats = calculateStats(records, intervals, nowMs);
+      const latest = stats.latest;
+      const freshness = getFreshness(latest.timeMs, nowMs);
+      const balanceLevel = getBalanceLevel(latest.balance);
+      const hasConsumption = intervals.some((interval) => Number.isFinite(interval.consumption));
+      const predictionText = Number.isFinite(stats.prediction.remainingDays)
+        ? `约 ${formatFixed(stats.prediction.remainingDays, 1)} 天`
+        : '数据不足';
+      const freshnessCopy = {
+        normal: { text: '采集正常', detail: '每小时自动更新' },
+        warning: { text: '数据可能已停止更新', detail: '最新采样已超过 2.5 小时' },
+        danger: { text: '采集异常', detail: '最新采样已超过 6 小时' },
+      }[freshness];
+      const alertText = {
+        normal: '余额充足',
+        notice: '剩余电量低于 20 度',
+        warning: '剩余电量低于 10 度',
+        critical: '剩余电量低于 5 度',
+      }[balanceLevel];
+      const alertDetail = Number.isFinite(stats.prediction.remainingDays)
+        ? `按近期速度约还能使用 ${formatFixed(stats.prediction.remainingDays, 1)} 天`
+        : '积累至少 12 小时有效数据后提供预测';
+
+      return {
+        state: 'ready',
+        balance: formatFixed(latest.balance, 2),
+        unit: latest.unit,
+        updatedAt: new Intl.DateTimeFormat('zh-CN', {
+          timeZone: 'Asia/Shanghai',
+          month: 'numeric',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).format(new Date(latest.timeMs)),
+        freshness,
+        balanceLevel,
+        status: freshnessCopy,
+        alert: { text: alertText, detail: alertDetail },
+        predictionText,
+        chartState: records.length >= 2 ? 'ready' : 'insufficient',
+        skippedCount,
+        stats: {
+          recent: {
+            label: stats.recent ? `最近 ${formatFixed(stats.recent.hours, 1)}h` : '最近采样区间',
+            value: stats.recent ? formatFixed(stats.recent.consumption, 2) : '—',
+            note: stats.recent ? '度 · 最近有效区间' : '至少需要两次采样',
+          },
+          day24: {
+            label: '近 24 小时',
+            value: hasConsumption ? formatFixed(stats.consumption24h, 2) : '—',
+            note: hasConsumption ? '度 · 按区间结束时间统计' : '数据不足',
+          },
+          day: {
+            label: '今日耗电',
+            value: hasConsumption ? formatFixed(stats.consumptionToday, 2) : '—',
+            note: hasConsumption ? '度 · 北京时间 00:00 起' : '数据不足',
+          },
+          prediction: {
+            label: '预计可用',
+            value: Number.isFinite(stats.prediction.remainingDays)
+              ? formatFixed(stats.prediction.remainingDays, 1)
+              : '—',
+            note: Number.isFinite(stats.prediction.remainingDays) ? '天 · 近期平均速度' : '数据不足',
+          },
+        },
+      };
+    }
+
     globalThis.NJUPowerCore = Object.freeze({
       calculateStats,
+      createDashboardModel,
       deriveIntervals,
       getBalanceLevel,
       getFreshness,

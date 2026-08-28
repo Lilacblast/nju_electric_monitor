@@ -182,3 +182,50 @@ test('freshness and balance thresholds match the dashboard rules', () => {
   assert.equal(core.getBalanceLevel(5), 'warning');
   assert.equal(core.getBalanceLevel(4.99), 'critical');
 });
+
+test('an empty dataset produces an honest empty dashboard model', () => {
+  const core = loadCore();
+  const model = core.createDashboardModel([], [], core.parseBeijingTime('2026-08-29T12:00:00'));
+
+  assert.equal(model.state, 'empty');
+  assert.equal(model.balance, '—');
+  assert.equal(model.status.text, '等待第一次采集');
+  assert.equal(model.stats.recent.value, '—');
+  assert.equal(model.predictionText, '数据不足');
+});
+
+test('a single record shows its real balance without inventing derived statistics', () => {
+  const core = loadCore();
+  const records = makeRecords(core, [['2026-08-28T17:15:28.912692', 99.51]]);
+  const model = core.createDashboardModel(
+    records,
+    [],
+    core.parseBeijingTime('2026-08-28T18:00:00'),
+  );
+
+  assert.equal(model.state, 'ready');
+  assert.equal(model.balance, '99.51');
+  assert.equal(model.unit, '度');
+  assert.equal(model.stats.recent.value, '—');
+  assert.equal(model.stats.day.value, '—');
+  assert.equal(model.predictionText, '数据不足');
+  assert.equal(model.chartState, 'insufficient');
+});
+
+test('low balance warning includes a forecast only when prediction is valid', () => {
+  const core = loadCore();
+  const records = makeRecords(core, [
+    ['2026-08-28T17:00:00', 9],
+    ['2026-08-29T05:00:00', 6],
+  ]);
+  const intervals = core.deriveIntervals(records);
+  const model = core.createDashboardModel(
+    records,
+    intervals,
+    core.parseBeijingTime('2026-08-29T05:30:00'),
+  );
+
+  assert.equal(model.balanceLevel, 'warning');
+  assert.match(model.alert.text, /低于 10 度/u);
+  assert.match(model.alert.detail, /约还能使用 1\.0 天/u);
+});
