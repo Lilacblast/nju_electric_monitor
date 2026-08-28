@@ -257,7 +257,13 @@
       const latest = stats.latest;
       const freshness = getFreshness(latest.timeMs, nowMs);
       const balanceLevel = getBalanceLevel(latest.balance);
-      const hasConsumption = intervals.some((interval) => Number.isFinite(interval.consumption));
+      const completedEligible = intervals.filter((interval) => (
+        interval.endTimeMs <= nowMs && Number.isFinite(interval.consumption)
+      ));
+      const cutoff24h = nowMs - 24 * 3600000;
+      const todayStart = getBeijingDayStart(nowMs);
+      const hasConsumption24h = completedEligible.some((interval) => interval.endTimeMs >= cutoff24h);
+      const hasConsumptionToday = completedEligible.some((interval) => interval.endTimeMs >= todayStart);
       const predictionText = Number.isFinite(stats.prediction.remainingDays)
         ? `约 ${formatFixed(stats.prediction.remainingDays, 1)} 天`
         : '数据不足';
@@ -303,13 +309,13 @@
           },
           day24: {
             label: '近 24 小时',
-            value: hasConsumption ? formatFixed(stats.consumption24h, 2) : '—',
-            note: hasConsumption ? '度 · 按区间结束时间统计' : '数据不足',
+            value: hasConsumption24h ? formatFixed(stats.consumption24h, 2) : '—',
+            note: hasConsumption24h ? '度 · 按区间结束时间统计' : '数据不足',
           },
           day: {
             label: '今日耗电',
-            value: hasConsumption ? formatFixed(stats.consumptionToday, 2) : '—',
-            note: hasConsumption ? '度 · 北京时间 00:00 起' : '数据不足',
+            value: hasConsumptionToday ? formatFixed(stats.consumptionToday, 2) : '—',
+            note: hasConsumptionToday ? '度 · 北京时间 00:00 起' : '数据不足',
           },
           prediction: {
             label: '预计可用',

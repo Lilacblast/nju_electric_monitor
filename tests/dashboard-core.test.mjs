@@ -229,3 +229,40 @@ test('low balance warning includes a forecast only when prediction is valid', ()
   assert.match(model.alert.text, /低于 10 度/u);
   assert.match(model.alert.detail, /约还能使用 1\.0 天/u);
 });
+
+test('window cards stay unavailable when the only valid interval is outside both windows', () => {
+  const core = loadCore();
+  const records = makeRecords(core, [
+    ['2026-08-27T09:00:00', 50],
+    ['2026-08-27T10:00:00', 49],
+  ]);
+  const intervals = core.deriveIntervals(records);
+  const model = core.createDashboardModel(
+    records,
+    intervals,
+    core.parseBeijingTime('2026-08-29T12:00:00'),
+  );
+
+  assert.equal(model.stats.day24.value, '—');
+  assert.equal(model.stats.day.value, '—');
+});
+
+test('window cards ignore low-confidence completed and future intervals', () => {
+  const core = loadCore();
+  const records = makeRecords(core, [
+    ['2026-08-29T10:00:00', 10],
+    ['2026-08-29T11:00:00', 33.7],
+    ['2026-08-29T13:00:00', 32.7],
+  ]);
+  const intervals = core.deriveIntervals(records);
+  const model = core.createDashboardModel(
+    records,
+    intervals,
+    core.parseBeijingTime('2026-08-29T12:00:00'),
+  );
+
+  assert.equal(intervals[0].consumption, null);
+  assert.equal(intervals[1].consumption, 1);
+  assert.equal(model.stats.day24.value, '—');
+  assert.equal(model.stats.day.value, '—');
+});
