@@ -266,3 +266,51 @@ test('window cards ignore low-confidence completed and future intervals', () => 
   assert.equal(model.stats.day24.value, '—');
   assert.equal(model.stats.day.value, '—');
 });
+
+test('production page exposes the selected B-direction semantic layout', () => {
+  const html = readFileSync(indexPath, 'utf8');
+
+  assert.match(html, /<meta\s+name="viewport"\s+content="[^"]*width=device-width/u);
+  for (const sectionId of [
+    'balance-section',
+    'stats-section',
+    'trend-section',
+    'consumption-section',
+    'recharge-section',
+    'alert-section',
+    'comparisons-section',
+    'site-footer',
+  ]) {
+    assert.match(html, new RegExp(`id=["']${sectionId}["']`, 'u'));
+  }
+
+  for (const range of ['24h', '7d', '30d', 'all']) {
+    assert.match(html, new RegExp(`data-range=["']${range}["']`, 'u'));
+    assert.match(html, new RegExp(`aria-pressed=["'](true|false)["']`, 'u'));
+  }
+
+  assert.match(html, /id=["']balance-chart["'][^>]*aria-label=/u);
+  assert.match(html, /id=["']consumption-chart["'][^>]*aria-label=/u);
+  assert.match(html, /@media\s*\(prefers-color-scheme:\s*dark\)/u);
+  assert.doesNotMatch(html, /NJU_USERNAME|NJU_PASSWORD|Cookie|Session|OAuth|Token|SECRET|学号|姓名/u);
+});
+
+test('production page exposes rendering helpers and safe text insertion', () => {
+  const html = readFileSync(indexPath, 'utf8');
+
+  for (const helper of [
+    'formatBalance',
+    'formatKWh',
+    'formatDateTime',
+    'formatDuration',
+    'formatPower',
+    'renderDashboard',
+    'renderNoData',
+    'renderError',
+  ]) {
+    assert.match(html, new RegExp(`function\\s+${helper}\\b`, 'u'));
+  }
+
+  assert.match(html, /\.textContent\s*=/u);
+  assert.doesNotMatch(html, /\.innerHTML\s*=/u);
+});

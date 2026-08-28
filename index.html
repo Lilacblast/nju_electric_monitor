@@ -3,12 +3,280 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NJU Power Watch</title>
+  <meta name="description" content="当前宿舍电量的只读静态摘要">
+  <title>NJU Power Watch · 宿舍电量</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f3ef;
+      --surface: #fbfaf7;
+      --ink: #20231f;
+      --muted: #71756e;
+      --line: #dedfd8;
+      --green: #2c7255;
+      --green-soft: #e7f0e9;
+      --yellow: #9c721d;
+      --yellow-soft: #f5edd4;
+      --red: #a14d48;
+      --red-soft: #f7e5e2;
+      --radius: 12px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --bg: #1d1e1a;
+        --surface: #252722;
+        --ink: #f4f3ed;
+        --muted: #a7aa9f;
+        --line: #3b3e36;
+        --green: #83c09e;
+        --green-soft: #263b2d;
+        --yellow: #e0bd67;
+        --yellow-soft: #40371f;
+        --red: #e49a91;
+        --red-soft: #432a29;
+      }
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--bg); }
+    body {
+      margin: 0;
+      min-width: 320px;
+      overflow-x: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.5;
+    }
+    button, canvas { font: inherit; }
+    button { color: inherit; }
+    .shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 32px;
+      padding: 38px 0 30px;
+      border-bottom: 1px solid var(--line);
+    }
+    .kicker, .section-kicker {
+      margin: 0 0 5px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 5px; font-size: clamp(24px, 3vw, 34px); letter-spacing: -.04em; line-height: 1.1; }
+    h2 { margin-bottom: 3px; font-size: 21px; letter-spacing: -.02em; }
+    h3 { margin-bottom: 0; font-size: 15px; }
+    .subtitle, .section-note, .meta, .stat-note, .footer-note { color: var(--muted); font-size: 13px; }
+    .subtitle { margin-bottom: 0; }
+    .collection-status { display: flex; align-items: flex-start; gap: 10px; min-width: 175px; padding-top: 4px; }
+    .status-dot { width: 8px; height: 8px; margin-top: 7px; flex: 0 0 8px; border-radius: 50%; background: var(--green); }
+    .collection-status[data-state="warning"] .status-dot { background: var(--yellow); }
+    .collection-status[data-state="danger"] .status-dot { background: var(--red); }
+    .status-copy { display: grid; gap: 1px; }
+    .status-copy strong { font-size: 13px; font-weight: 650; }
+    .status-copy span { color: var(--muted); font-size: 12px; }
+    .notice { margin: 20px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+    .notice[hidden], [hidden] { display: none !important; }
+    .notice-error { border-color: var(--red); color: var(--red); background: var(--red-soft); }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(220px, .45fr);
+      align-items: end;
+      gap: 34px;
+      padding: 54px 0 48px;
+      border-bottom: 1px solid var(--line);
+    }
+    .hero-label { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
+    .balance-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .balance-value { font-size: clamp(62px, 12vw, 142px); font-weight: 650; letter-spacing: -.09em; line-height: .9; font-variant-numeric: tabular-nums; }
+    .balance-unit { color: var(--muted); font-size: 20px; }
+    .updated { margin: 22px 0 0; color: var(--muted); font-size: 13px; }
+    .hero-side { display: grid; gap: 20px; padding-bottom: 5px; }
+    .side-block { padding-top: 13px; border-top: 1px solid var(--line); }
+    .side-label { margin: 0 0 2px; color: var(--muted); font-size: 12px; }
+    .side-value { margin: 0; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .status-pill { display: inline-flex; width: fit-content; max-width: 100%; margin-top: 7px; padding: 4px 9px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 12px; }
+    .status-pill[data-level="notice"], .status-pill[data-level="warning"] { background: var(--yellow-soft); color: var(--yellow); }
+    .status-pill[data-level="critical"] { background: var(--red-soft); color: var(--red); }
+    .section { padding: 38px 0; border-bottom: 1px solid var(--line); }
+    .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 22px; }
+    .section-note { margin: 0; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .stat { min-width: 0; padding: 19px 18px 20px 0; }
+    .stat + .stat { padding-left: 18px; border-left: 1px solid var(--line); }
+    .stat-label { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+    .stat-value { margin: 0; font-size: 27px; font-weight: 600; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+    .stat-note { margin: 5px 0 0; font-size: 12px; }
+    .range-list { display: flex; flex-wrap: wrap; gap: 5px; }
+    .range-button { min-width: 58px; min-height: 44px; padding: 8px 13px; border: 1px solid var(--line); border-radius: 8px; background: transparent; cursor: pointer; font-size: 13px; }
+    .range-button[aria-pressed="true"] { border-color: var(--green); background: var(--green-soft); color: var(--green); }
+    .range-button:focus-visible { outline: 3px solid color-mix(in srgb, var(--green) 35%, transparent); outline-offset: 2px; }
+    .chart-frame { position: relative; min-height: 250px; padding: 12px 0 0; }
+    .chart-frame canvas { display: block; width: 100%; max-width: 100%; height: 260px; }
+    .chart-empty { display: grid; min-height: 220px; place-items: center; border: 1px dashed var(--line); color: var(--muted); font-size: 13px; text-align: center; }
+    .chart-empty[hidden] { display: none !important; }
+    .recharge-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+    .recharge-item { display: grid; grid-template-columns: minmax(120px, .35fr) minmax(0, 1fr) auto; align-items: center; gap: 20px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+    .recharge-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .recharge-title { margin: 0; font-size: 14px; font-weight: 600; }
+    .recharge-detail { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+    .recharge-tag { padding: 3px 8px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 11px; white-space: nowrap; }
+    .recharge-tag[data-confidence="low"] { background: var(--yellow-soft); color: var(--yellow); }
+    .empty-row { color: var(--muted); font-size: 13px; }
+    .alert-block { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .alert-block[data-level="notice"], .alert-block[data-level="warning"] { border-color: var(--yellow); background: var(--yellow-soft); }
+    .alert-block[data-level="critical"] { border-color: var(--red); background: var(--red-soft); }
+    .alert-title { margin: 0 0 3px; font-weight: 650; }
+    .alert-detail { margin: 0; color: var(--muted); font-size: 13px; }
+    .comparison-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+    .comparison { min-width: 0; padding: 18px; background: var(--surface); }
+    .comparison-label { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+    .comparison-value { margin: 0; font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .comparison-note { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    footer { padding: 28px 0 42px; }
+    .footer-line { display: flex; justify-content: space-between; gap: 24px; color: var(--muted); font-size: 12px; }
+    .footer-line p { margin: 0; }
+    @media (max-width: 760px) {
+      .shell { width: min(100% - 28px, 620px); }
+      .topbar { padding-top: 27px; gap: 20px; }
+      .collection-status { min-width: 0; }
+      .hero { grid-template-columns: 1fr; gap: 30px; padding: 42px 0 36px; }
+      .hero-side { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .stat:nth-child(3) { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); }
+      .stat:nth-child(4) { border-top: 1px solid var(--line); }
+      .section { padding: 30px 0; }
+      .section-head { align-items: flex-start; flex-direction: column; gap: 14px; }
+      .recharge-item { grid-template-columns: 1fr auto; gap: 7px 14px; }
+      .recharge-time { grid-column: 1; }
+      .recharge-tag { grid-column: 2; grid-row: 1 / span 2; }
+      .recharge-copy { grid-column: 1; }
+      .comparison-grid { grid-template-columns: 1fr; }
+      .footer-line { flex-direction: column; gap: 8px; }
+    }
+    @media (max-width: 390px) {
+      .shell { width: calc(100% - 24px); }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .balance-value { font-size: clamp(58px, 23vw, 88px); }
+      .stat { padding-right: 10px; }
+      .stat + .stat { padding-left: 10px; }
+      .stat-value { font-size: 23px; }
+      .range-button { flex: 1 1 0; min-width: 0; padding-inline: 8px; }
+    }
+  </style>
 </head>
 <body>
-  <main>
-    <h1>NJU Power Watch</h1>
+  <main id="dashboard" class="shell">
+    <header class="topbar" aria-labelledby="page-title">
+      <div>
+        <p class="kicker">Energy monitor</p>
+        <h1 id="page-title">NJU Power Watch</h1>
+        <p class="subtitle">当前宿舍 · 只读电量摘要</p>
+      </div>
+      <div id="collection-status" class="collection-status" data-state="normal" role="status">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="status-copy">
+          <strong id="freshness-text">等待采集</strong>
+          <span id="freshness-detail">每小时自动更新</span>
+        </div>
+      </div>
+    </header>
+
+    <div id="error-banner" class="notice notice-error" role="alert" hidden></div>
+
+    <section id="balance-section" class="hero" aria-labelledby="balance-heading">
+      <div>
+        <p id="balance-heading" class="hero-label">当前余额</p>
+        <div class="balance-line">
+          <span id="balance-value" class="balance-value">—</span>
+          <span id="balance-unit" class="balance-unit">度</span>
+        </div>
+        <p class="updated">北京时间 <time id="updated-at">—</time> 更新</p>
+      </div>
+      <div class="hero-side">
+        <div class="side-block">
+          <p class="side-label">预计可用</p>
+          <p id="forecast-value" class="side-value">数据不足</p>
+        </div>
+        <div class="side-block">
+          <p class="side-label">余额状态</p>
+          <span id="balance-status" class="status-pill" data-level="normal">等待第一次采集</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="stats-section" class="section" aria-labelledby="stats-heading">
+      <div class="section-head">
+        <div><p class="section-kicker">Summary</p><h2 id="stats-heading">今日与近期</h2></div>
+        <p class="section-note">所有耗电按有效采样区间计算</p>
+      </div>
+      <div class="stats-grid">
+        <article class="stat"><p id="stat-recent-label" class="stat-label">最近采样区间</p><p id="stat-recent-value" class="stat-value">—</p><p id="stat-recent-note" class="stat-note">至少需要两次采样</p></article>
+        <article class="stat"><p id="stat-24h-label" class="stat-label">近 24 小时</p><p id="stat-24h-value" class="stat-value">—</p><p id="stat-24h-note" class="stat-note">数据不足</p></article>
+        <article class="stat"><p id="stat-today-label" class="stat-label">今日耗电</p><p id="stat-today-value" class="stat-value">—</p><p id="stat-today-note" class="stat-note">数据不足</p></article>
+        <article class="stat"><p id="stat-prediction-label" class="stat-label">预计可用</p><p id="stat-prediction-value" class="stat-value">—</p><p id="stat-prediction-note" class="stat-note">数据不足</p></article>
+      </div>
+    </section>
+
+    <section id="trend-section" class="section" aria-labelledby="trend-heading">
+      <div class="section-head">
+        <div><p class="section-kicker">Balance trend</p><h2 id="trend-heading">余额趋势</h2></div>
+        <div class="range-list" aria-label="余额趋势范围">
+          <button id="range-24h" class="range-button" type="button" data-range="24h" aria-pressed="true">24 小时</button>
+          <button id="range-7d" class="range-button" type="button" data-range="7d" aria-pressed="false">7 天</button>
+          <button id="range-30d" class="range-button" type="button" data-range="30d" aria-pressed="false">30 天</button>
+          <button id="range-all" class="range-button" type="button" data-range="all" aria-pressed="false">全部</button>
+        </div>
+      </div>
+      <div class="chart-frame">
+        <canvas id="balance-chart" aria-label="所选时间范围内的余额趋势折线图" hidden></canvas>
+        <div id="balance-chart-empty" class="chart-empty">至少需要两次采样</div>
+      </div>
+    </section>
+
+    <section id="consumption-section" class="section" aria-labelledby="consumption-heading">
+      <div class="section-head">
+        <div><p class="section-kicker">Interval use</p><h2 id="consumption-heading">区间耗电</h2></div>
+        <p class="section-note">柱高代表耗电量，悬停可查看平均负载</p>
+      </div>
+      <div class="chart-frame">
+        <canvas id="consumption-chart" aria-label="最近 24 小时区间耗电柱状图" hidden></canvas>
+        <div id="consumption-chart-empty" class="chart-empty">至少需要两次采样</div>
+      </div>
+    </section>
+
+    <section id="recharge-section" class="section" aria-labelledby="recharge-heading">
+      <div class="section-head"><div><p class="section-kicker">Recharge log</p><h2 id="recharge-heading">充值记录</h2></div><p class="section-note">推测结果仅供参考</p></div>
+      <ul id="recharge-list" class="recharge-list"><li class="recharge-item empty-row">暂无充值记录</li></ul>
+    </section>
+
+    <section id="alert-section" class="section" aria-labelledby="alert-heading">
+      <div class="section-head"><div><p class="section-kicker">Notice</p><h2 id="alert-heading">低余额预警</h2></div></div>
+      <div id="alert-block" class="alert-block" data-level="normal">
+        <div><p id="alert-title" class="alert-title">暂无电量记录</p><p id="alert-detail" class="alert-detail">等待第一次采集</p></div>
+        <span id="alert-level" class="status-pill" data-level="normal">—</span>
+      </div>
+    </section>
+
+    <section id="comparisons-section" class="section" aria-labelledby="comparisons-heading">
+      <div class="section-head"><div><p class="section-kicker">For scale</p><h2 id="comparisons-heading">趣味换算</h2></div><p class="section-note">基于近 24 小时耗电，仅为估算</p></div>
+      <div class="comparison-grid">
+        <article class="comparison"><p class="comparison-label">手机充电</p><p id="comparison-phone" class="comparison-value">—</p><p class="comparison-note">按约 0.015 度 / 次</p></article>
+        <article class="comparison"><p class="comparison-label">空调运行</p><p id="comparison-ac" class="comparison-value">—</p><p class="comparison-note">按约 1.1 度 / 小时</p></article>
+        <article class="comparison"><p class="comparison-label">电动车里程</p><p id="comparison-bike" class="comparison-value">—</p><p class="comparison-note">按约 0.025 度 / 公里</p></article>
+      </div>
+    </section>
   </main>
+  <footer id="site-footer" class="shell">
+    <div class="footer-line"><p>数据来源：仓库静态 CSV · 每小时自动更新</p><p id="footer-note">非官方只读页面</p></div>
+  </footer>
 
   <script id="dashboard-core">
   (() => {
@@ -328,6 +596,167 @@
       };
     }
 
+    function formatBalance(value) {
+      return Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '—';
+    }
+
+    function formatKWh(value) {
+      return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)} 度` : '—';
+    }
+
+    function formatDateTime(value) {
+      const timeMs = Number(value);
+      if (!Number.isFinite(timeMs)) return '—';
+      return new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(new Date(timeMs));
+    }
+
+    function formatDuration(hours) {
+      return Number.isFinite(Number(hours)) ? `${Number(hours).toFixed(1)} 小时` : '—';
+    }
+
+    function formatPower(powerKW) {
+      return Number.isFinite(Number(powerKW)) ? `${(Number(powerKW) * 1000).toFixed(0)} W` : '—';
+    }
+
+    function getElement(documentRef, id) {
+      return documentRef && typeof documentRef.getElementById === 'function'
+        ? documentRef.getElementById(id)
+        : null;
+    }
+
+    function setText(documentRef, id, value) {
+      const element = getElement(documentRef, id);
+      if (element) element.textContent = String(value ?? '—');
+      return element;
+    }
+
+    function renderRechargeEvents(documentRef, events) {
+      const list = getElement(documentRef, 'recharge-list');
+      if (!list || typeof list.removeChild !== 'function') return;
+      while (list.firstChild) list.removeChild(list.firstChild);
+
+      const items = Array.isArray(events) ? events.slice(-10).reverse() : [];
+      if (items.length === 0) {
+        const empty = documentRef.createElement('li');
+        empty.className = 'recharge-item empty-row';
+        empty.textContent = '暂无充值记录';
+        list.appendChild(empty);
+        return;
+      }
+
+      items.forEach((event) => {
+        const item = documentRef.createElement('li');
+        item.className = 'recharge-item';
+
+        const time = documentRef.createElement('time');
+        time.className = 'recharge-time';
+        time.dateTime = event.time || '';
+        time.textContent = formatDateTime(event.timeMs);
+
+        const copy = documentRef.createElement('div');
+        copy.className = 'recharge-copy';
+        const title = documentRef.createElement('p');
+        title.className = 'recharge-title';
+        title.textContent = event.confidence === 'high' ? `推测充值 +${formatBalance(event.estimatedRecharge)} 度` : '疑似充值 / 转电';
+        const detail = documentRef.createElement('p');
+        detail.className = 'recharge-detail';
+        detail.textContent = event.confidence === 'high'
+          ? `净增 ${formatBalance(event.netIncrease)} 度 · 同期耗电 ${formatBalance(event.estimatedConsumption)} 度`
+          : `净增 ${formatBalance(event.netIncrease)} 度 · 无法可靠估算同期耗电`;
+        copy.appendChild(title);
+        copy.appendChild(detail);
+
+        const tag = documentRef.createElement('span');
+        tag.className = 'recharge-tag';
+        tag.dataset.confidence = event.confidence === 'high' ? 'high' : 'low';
+        tag.textContent = event.confidence === 'high' ? '高置信度' : '低置信度';
+
+        item.appendChild(time);
+        item.appendChild(copy);
+        item.appendChild(tag);
+        list.appendChild(item);
+      });
+    }
+
+    function renderComparisons(documentRef, consumption24h) {
+      const amount = Number(consumption24h);
+      const values = Number.isFinite(amount) && amount >= 0
+        ? [`约 ${(amount / 0.015).toFixed(0)} 次`, `约 ${(amount / 1.1).toFixed(1)} 小时`, `约 ${(amount / 0.025).toFixed(1)} 公里`]
+        : ['数据不足', '数据不足', '数据不足'];
+      ['comparison-phone', 'comparison-ac', 'comparison-bike'].forEach((id, index) => setText(documentRef, id, values[index]));
+    }
+
+    function renderDashboard(model, options = {}) {
+      const documentRef = options.document || (typeof document !== 'undefined' ? document : null);
+      if (!documentRef || !model) return model;
+
+      setText(documentRef, 'balance-value', model.balance);
+      setText(documentRef, 'balance-unit', model.unit || '度');
+      setText(documentRef, 'updated-at', model.updatedAt || '—');
+      setText(documentRef, 'forecast-value', model.predictionText || '数据不足');
+      setText(documentRef, 'freshness-text', model.status?.text || '等待采集');
+      setText(documentRef, 'freshness-detail', model.status?.detail || '每小时自动更新');
+      setText(documentRef, 'balance-status', model.alert?.text || '等待第一次采集');
+      setText(documentRef, 'alert-title', model.alert?.text || '暂无电量记录');
+      setText(documentRef, 'alert-detail', model.alert?.detail || '等待第一次采集');
+      setText(documentRef, 'alert-level', model.balanceLevel === 'normal' ? '正常' : '请留意');
+
+      const status = getElement(documentRef, 'collection-status');
+      if (status) status.dataset.state = model.freshness || 'normal';
+      const balanceStatus = getElement(documentRef, 'balance-status');
+      if (balanceStatus) balanceStatus.dataset.level = model.balanceLevel || 'normal';
+      const alert = getElement(documentRef, 'alert-block');
+      if (alert) alert.dataset.level = model.balanceLevel || 'normal';
+      const alertLevel = getElement(documentRef, 'alert-level');
+      if (alertLevel) alertLevel.dataset.level = model.balanceLevel || 'normal';
+
+      const stats = model.stats || {};
+      [['recent', 'recent'], ['day24', '24h'], ['day', 'today'], ['prediction', 'prediction']].forEach(([key, suffix]) => {
+        const stat = stats[key] || {};
+        setText(documentRef, `stat-${suffix}-label`, stat.label || '—');
+        setText(documentRef, `stat-${suffix}-value`, stat.value || '—');
+        setText(documentRef, `stat-${suffix}-note`, stat.note || '数据不足');
+      });
+
+      renderRechargeEvents(documentRef, options.rechargeEvents || []);
+      renderComparisons(documentRef, options.consumption24h);
+
+      const chartEmptyText = model.chartState === 'chart-error' ? '图表组件加载失败' : '至少需要两次采样';
+      const chartReady = model.chartState === 'ready' && model.state === 'ready';
+      ['balance-chart', 'consumption-chart'].forEach((id) => {
+        const canvas = getElement(documentRef, id);
+        if (canvas) canvas.hidden = !chartReady;
+      });
+      ['balance-chart-empty', 'consumption-chart-empty'].forEach((id) => {
+        const empty = setText(documentRef, id, chartEmptyText);
+        if (empty) empty.hidden = chartReady;
+      });
+      return model;
+    }
+
+    function renderNoData(documentRef = null) {
+      const target = documentRef || (typeof document !== 'undefined' ? document : null);
+      return renderDashboard(createDashboardModel([], [], Date.now()), { document: target });
+    }
+
+    function renderError(error, documentRef = null) {
+      const target = documentRef || (typeof document !== 'undefined' ? document : null);
+      const banner = getElement(target, 'error-banner');
+      if (banner) {
+        banner.textContent = '数据读取失败';
+        banner.hidden = false;
+      }
+      return error;
+    }
+
     globalThis.NJUPowerCore = Object.freeze({
       calculateStats,
       createDashboardModel,
@@ -337,6 +766,16 @@
       normalizeRecords,
       parseBeijingTime,
       parseCsv,
+    });
+    globalThis.NJUPowerUI = Object.freeze({
+      formatBalance,
+      formatDateTime,
+      formatDuration,
+      formatKWh,
+      formatPower,
+      renderDashboard,
+      renderError,
+      renderNoData,
     });
   })();
   </script>
