@@ -107,7 +107,130 @@
       };
     }
 
+    function deriveIntervals(records) {
+      const intervals = [];
+
+      for (let index = 1; index < records.length; index += 1) {
+        const previous = records[index - 1];
+        const current = records[index];
+        const hours = (current.timeMs - previous.timeMs) / 3600000;
+        if (!Number.isFinite(hours) || hours <= 0) continue;
+
+        const delta = current.balance - previous.balance;
+        let consumption;
+        let rechargeEvent = null;
+
+        if (delta <= 0) {
+          consumption = previous.balance - current.balance;
+        } else {
+          const estimatedRecharge = Math.ceil(delta / 10) * 10;
+          const estimatedConsumption = estimatedRecharge - delta;
+          const confidence = estimatedConsumption <= 5 ? 'high' : 'low';
+
+          rechargeEvent = {
+            time: current.time,
+            timeMs: current.timeMs,
+            previousBalance: previous.balance,
+            currentBalance: current.balance,
+            netIncrease: delta,
+            estimatedRecharge,
+            estimatedConsumption,
+            confidence,
+          };
+          consumption = confidence === 'high' ? Math.max(0, estimatedConsumption) : null;
+        }
+
+        intervals.push({
+          startTime: previous.time,
+          startTimeMs: previous.timeMs,
+          endTime: current.time,
+          endTimeMs: current.timeMs,
+          hours,
+          delta,
+          consumption,
+          averagePowerKW: Number.isFinite(consumption) ? consumption / hours : null,
+          rechargeEvent,
+        });
+      }
+
+      return intervals;
+    }
+
+    function getBeijingDayStart(timeMs) {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(new Date(timeMs));
+      const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      return Date.parse(`${values.year}-${values.month}-${values.day}T00:00:00+08:00`);
+    }
+
+    function sumConsumption(intervals) {
+      return intervals.reduce((total, interval) => (
+        Number.isFinite(interval.consumption) ? total + interval.consumption : total
+      ), 0);
+    }
+
+    function calculateStats(records, intervals, nowMs = Date.now()) {
+      const latest = records.at(-1) ?? null;
+      const completed = intervals.filter((interval) => interval.endTimeMs <= nowMs);
+      const eligible = completed.filter((interval) => Number.isFinite(interval.consumption));
+      const cutoff24h = nowMs - 24 * 3600000;
+      const todayStart = getBeijingDayStart(nowMs);
+      const within24h = eligible.filter((interval) => interval.endTimeMs >= cutoff24h);
+      const withinToday = eligible.filter((interval) => interval.endTimeMs >= todayStart);
+      const sevenDayCutoff = nowMs - 7 * 24 * 3600000;
+      const historySpan = records.length > 1 ? records.at(-1).timeMs - records[0].timeMs : 0;
+      const predictionIntervals = historySpan >= 7 * 24 * 3600000
+        ? eligible.filter((interval) => interval.endTimeMs >= sevenDayCutoff)
+        : eligible;
+      const totalHours = predictionIntervals.reduce((total, interval) => total + interval.hours, 0);
+      const totalConsumption = sumConsumption(predictionIntervals);
+      const dailyAverage = totalHours >= 12 && totalConsumption > 0
+        ? (totalConsumption / totalHours) * 24
+        : null;
+      const remainingDays = dailyAverage && latest && latest.balance >= 0
+        ? latest.balance / dailyAverage
+        : null;
+
+      return {
+        latest,
+        recent: eligible.at(-1) ?? null,
+        consumption24h: sumConsumption(within24h),
+        consumptionToday: sumConsumption(withinToday),
+        rechargeEvents: completed
+          .filter((interval) => interval.rechargeEvent)
+          .map((interval) => interval.rechargeEvent),
+        prediction: {
+          totalHours,
+          totalConsumption,
+          dailyAverage,
+          remainingDays,
+        },
+      };
+    }
+
+    function getFreshness(latestMs, nowMs = Date.now()) {
+      const ageHours = Math.max(0, nowMs - latestMs) / 3600000;
+      if (ageHours > 6) return 'danger';
+      if (ageHours > 2.5) return 'warning';
+      return 'normal';
+    }
+
+    function getBalanceLevel(balance) {
+      if (balance >= 20) return 'normal';
+      if (balance >= 10) return 'notice';
+      if (balance >= 5) return 'warning';
+      return 'critical';
+    }
+
     globalThis.NJUPowerCore = Object.freeze({
+      calculateStats,
+      deriveIntervals,
+      getBalanceLevel,
+      getFreshness,
       normalizeRecords,
       parseBeijingTime,
       parseCsv,
