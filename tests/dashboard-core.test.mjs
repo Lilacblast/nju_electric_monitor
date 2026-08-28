@@ -31,6 +31,49 @@ function loadCore() {
   return context.NJUPowerCore;
 }
 
+function loadUI() {
+  assert.ok(existsSync(indexPath), 'index.html must exist');
+  const html = readFileSync(indexPath, 'utf8');
+  const match = html.match(/<script id="dashboard-core">([\s\S]*?)<\/script>/u);
+  assert.ok(match, 'index.html must expose the marked dashboard core');
+
+  const context = vm.createContext({ console, Date, Intl, Map, Math, Number, Object, Set, String });
+  context.globalThis = context;
+  vm.runInContext(match[1], context, { filename: 'dashboard-core.js' });
+  assert.ok(context.NJUPowerUI, 'dashboard UI must be exported');
+  return context.NJUPowerUI;
+}
+
+function makeFakeDocument() {
+  const nodes = new Map();
+  const createNode = (tagName = 'div') => ({
+    tagName,
+    textContent: '',
+    hidden: false,
+    dataset: {},
+    children: [],
+    firstChild: null,
+    appendChild(child) {
+      this.children.push(child);
+      this.firstChild = this.children[0] ?? null;
+      return child;
+    },
+    removeChild(child) {
+      this.children = this.children.filter((candidate) => candidate !== child);
+      this.firstChild = this.children[0] ?? null;
+      return child;
+    },
+  });
+
+  return {
+    getElementById(id) {
+      if (!nodes.has(id)) nodes.set(id, createNode());
+      return nodes.get(id);
+    },
+    createElement: createNode,
+  };
+}
+
 test('parses quoted CSV cells without corrupting commas or escaped quotes', () => {
   const core = loadCore();
   const rows = core.parseCsv(
@@ -313,4 +356,16 @@ test('production page exposes rendering helpers and safe text insertion', () => 
 
   assert.match(html, /\.textContent\s*=/u);
   assert.doesNotMatch(html, /\.innerHTML\s*=/u);
+});
+
+test('empty rendering does not label missing data as normal and reports skipped rows', () => {
+  const core = loadCore();
+  const ui = loadUI();
+  const documentRef = makeFakeDocument();
+  const model = core.createDashboardModel([], [], core.parseBeijingTime('2026-08-29T12:00:00'), 3);
+
+  ui.renderDashboard(model, { document: documentRef });
+
+  assert.equal(documentRef.getElementById('alert-level').textContent, '—');
+  assert.equal(documentRef.getElementById('footer-note').textContent, '已跳过 3 行无效记录 · 非官方只读页面');
 });

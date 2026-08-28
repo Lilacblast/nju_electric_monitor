@@ -707,16 +707,19 @@
       setText(documentRef, 'balance-status', model.alert?.text || '等待第一次采集');
       setText(documentRef, 'alert-title', model.alert?.text || '暂无电量记录');
       setText(documentRef, 'alert-detail', model.alert?.detail || '等待第一次采集');
-      setText(documentRef, 'alert-level', model.balanceLevel === 'normal' ? '正常' : '请留意');
+      setText(documentRef, 'alert-level', model.state === 'empty' ? '—' : (model.balanceLevel === 'normal' ? '正常' : '请留意'));
+      setText(documentRef, 'footer-note', model.skippedCount > 0
+        ? `已跳过 ${model.skippedCount} 行无效记录 · 非官方只读页面`
+        : '非官方只读页面');
 
       const status = getElement(documentRef, 'collection-status');
       if (status) status.dataset.state = model.freshness || 'normal';
       const balanceStatus = getElement(documentRef, 'balance-status');
       if (balanceStatus) balanceStatus.dataset.level = model.balanceLevel || 'normal';
       const alert = getElement(documentRef, 'alert-block');
-      if (alert) alert.dataset.level = model.balanceLevel || 'normal';
+      if (alert) alert.dataset.level = model.state === 'empty' ? 'empty' : (model.balanceLevel || 'normal');
       const alertLevel = getElement(documentRef, 'alert-level');
-      if (alertLevel) alertLevel.dataset.level = model.balanceLevel || 'normal';
+      if (alertLevel) alertLevel.dataset.level = model.state === 'empty' ? 'empty' : (model.balanceLevel || 'normal');
 
       const stats = model.stats || {};
       [['recent', 'recent'], ['day24', '24h'], ['day', 'today'], ['prediction', 'prediction']].forEach(([key, suffix]) => {
