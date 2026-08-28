@@ -689,7 +689,8 @@
 
     function renderComparisons(documentRef, consumption24h) {
       const amount = Number(consumption24h);
-      const values = Number.isFinite(amount) && amount >= 0
+      const available = consumption24h !== null && consumption24h !== undefined;
+      const values = available && Number.isFinite(amount) && amount >= 0
         ? [`约 ${(amount / 0.015).toFixed(0)} 次`, `约 ${(amount / 1.1).toFixed(1)} 小时`, `约 ${(amount / 0.025).toFixed(1)} 公里`]
         : ['数据不足', '数据不足', '数据不足'];
       ['comparison-phone', 'comparison-ac', 'comparison-bike'].forEach((id, index) => setText(documentRef, id, values[index]));
@@ -1105,6 +1106,7 @@
           intervals: nextIntervals,
           model: nextModel,
           stats: nextStats,
+          consumption24h: nextModel.stats.day24.value === '—' ? null : nextStats.consumption24h,
           skippedCount: normalized.skippedCount,
         };
       }
@@ -1119,7 +1121,7 @@
           renderDashboard(model, {
             document: documentRef,
             rechargeEvents: next.stats.rechargeEvents,
-            consumption24h: next.stats.consumption24h,
+            consumption24h: next.consumption24h,
           });
           updateCharts(records, intervals);
           const banner = getElement(documentRef, 'error-banner');

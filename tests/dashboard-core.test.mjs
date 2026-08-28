@@ -467,6 +467,50 @@ test('refresh failure preserves the last successful dashboard state', async () =
   assert.equal(documentRef.getElementById('error-banner').hidden, false);
 });
 
+test('comparisons stay unavailable when a single record has no completed consumption interval', async () => {
+  const { controllerApi } = loadControllerRuntime();
+  const documentRef = makeFakeDocument();
+  const controller = controllerApi.createDashboardController({
+    document: documentRef,
+    fetch: async () => ({
+      ok: true,
+      text: async () => 'time,num,unit\n2026-08-28T17:15:28.912692,99.51,度\n',
+    }),
+    Chart: null,
+    now: () => Date.parse('2026-08-28T18:00:00+08:00'),
+  });
+
+  await controller.refreshDashboard();
+
+  for (const id of ['comparison-phone', 'comparison-ac', 'comparison-bike']) {
+    assert.equal(documentRef.getElementById(id).textContent, '数据不足');
+  }
+});
+
+test('comparisons stay unavailable when valid consumption is outside the 24-hour window', async () => {
+  const { controllerApi } = loadControllerRuntime();
+  const documentRef = makeFakeDocument();
+  const controller = controllerApi.createDashboardController({
+    document: documentRef,
+    fetch: async () => ({
+      ok: true,
+      text: async () => [
+        'time,num,unit',
+        '2026-08-27T09:00:00,50,度',
+        '2026-08-27T10:00:00,49,度',
+      ].join('\n'),
+    }),
+    Chart: null,
+    now: () => Date.parse('2026-08-29T12:00:00+08:00'),
+  });
+
+  await controller.refreshDashboard();
+
+  for (const id of ['comparison-phone', 'comparison-ac', 'comparison-bike']) {
+    assert.equal(documentRef.getElementById(id).textContent, '数据不足');
+  }
+});
+
 test('production page pins the verified Chart.js UMD build', () => {
   const html = readFileSync(indexPath, 'utf8');
   assert.match(html, /https:\/\/cdn\.jsdelivr\.net\/npm\/chart\.js@4\.5\.1\/dist\/chart\.umd\.min\.js/u);
