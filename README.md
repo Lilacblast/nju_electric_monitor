@@ -2,9 +2,11 @@
 
 这是一个用于监控南京大学电费充值页面剩余电量的Python脚本，并提供可视化网页面板。
 
-[![仅20次电费变化曲线](data/recent_20_changes.png)](https://file+.vscode-resource.vscode-cdn.net/d%3A/Documents/Github/nju_electric_monitor/data/electricity_trend.png)
+## GitHub Pages 面板
 
-[![电费变化曲线](data/electricity_trend.png)](data/electricity_trend.png)
+[打开 NJU Power Watch](https://lilacblast.github.io/nju_electric_monitor/)
+
+面板是纯静态、只读页面，只读取仓库中的 `data/electricity_data.csv`。它不会连接南京大学登录或缴费接口，也不包含账号、密码、姓名、学号或具体宿舍号。
 
 [点击查看电量数据表（CSV）](data/electricity_data.csv)
 
@@ -172,9 +174,9 @@ python src/web_panel.py
 
 ## 🏁网页面板功能
 
-- 实时展示电量变化曲线（可缩放、拖动、悬停查看数据）
-- 数据表格美观展示，支持一键刷新
-- 科技感UI设计，适配桌面与移动端
+- 展示当前余额、更新时间、近期耗电、低余额预警与粗略续航预测
+- 展示余额趋势、区间耗电和推测充值事件，每 5 分钟自动读取最新 CSV
+- 适配桌面与移动端，并支持系统深色模式
 
 ## 💡注意事项
 
