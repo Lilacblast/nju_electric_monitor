@@ -44,6 +44,31 @@ function loadUI() {
   return context.NJUPowerUI;
 }
 
+function loadControllerRuntime() {
+  assert.ok(existsSync(indexPath), 'index.html must exist');
+  const html = readFileSync(indexPath, 'utf8');
+  const match = html.match(/<script id="dashboard-core">([\s\S]*?)<\/script>/u);
+  assert.ok(match, 'index.html must expose the marked dashboard core');
+
+  const context = vm.createContext({
+    console,
+    Date,
+    Error,
+    Intl,
+    Map,
+    Math,
+    Number,
+    Object,
+    Promise,
+    Set,
+    String,
+  });
+  context.globalThis = context;
+  vm.runInContext(match[1], context, { filename: 'dashboard-core.js' });
+  assert.ok(context.NJUPowerController, 'dashboard controller must be exported');
+  return { context, controllerApi: context.NJUPowerController };
+}
+
 function makeFakeDocument() {
   const nodes = new Map();
   const createNode = (tagName = 'div') => ({
@@ -368,4 +393,136 @@ test('empty rendering does not label missing data as normal and reports skipped 
 
   assert.equal(documentRef.getElementById('alert-level').textContent, '—');
   assert.equal(documentRef.getElementById('footer-note').textContent, '已跳过 3 行无效记录 · 非官方只读页面');
+});
+
+test('controller cache-busts the CSV request and exposes the supported ranges', async () => {
+  const { controllerApi } = loadControllerRuntime();
+  const calls = [];
+  const controller = controllerApi.createDashboardController({
+    fetch: async (...args) => {
+      calls.push(args);
+      return { ok: true, text: async () => 'time,num,unit\n2026-08-28T17:00:00,99.51,度\n' };
+    },
+    Chart: null,
+  });
+
+  await controller.loadData();
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0][0], /^data\/electricity_data\.csv\?t=\d+$/u);
+  assert.equal(calls[0][1].cache, 'no-store');
+  assert.deepEqual(Array.from(controller.ranges), ['24h', '7d', '30d', 'all']);
+  assert.equal(controller.setRange('30d'), '30d');
+  assert.equal(controller.setRange('unknown'), '30d');
+});
+
+test('controller starts an immediate refresh loop every five minutes', async () => {
+  const { controllerApi } = loadControllerRuntime();
+  const timers = [];
+  let fetchCount = 0;
+  const controller = controllerApi.createDashboardController({
+    fetch: async () => {
+      fetchCount += 1;
+      return { ok: true, text: async () => 'time,num,unit\n2026-08-28T17:00:00,99.51,度\n' };
+    },
+    Chart: null,
+    setInterval: (callback, delay) => {
+      timers.push({ callback, delay });
+      return timers.length;
+    },
+  });
+
+  controller.start();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(fetchCount, 1);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, 300000);
+});
+
+test('refresh failure preserves the last successful dashboard state', async () => {
+  const { controllerApi } = loadControllerRuntime();
+  let shouldFail = false;
+  const calls = [];
+  const documentRef = makeFakeDocument();
+  const controller = controllerApi.createDashboardController({
+    document: documentRef,
+    fetch: async () => {
+      calls.push(true);
+      if (shouldFail) throw new Error('offline');
+      return { ok: true, text: async () => 'time,num,unit\n2026-08-28T17:00:00,99.51,度\n' };
+    },
+    Chart: null,
+  });
+
+  await controller.refreshDashboard();
+  const previous = controller.getState();
+  shouldFail = true;
+  const result = await controller.refreshDashboard();
+
+  assert.equal(calls.length, 2);
+  assert.equal(result.preserved, true);
+  assert.deepEqual(controller.getState().records, previous.records);
+  assert.equal(documentRef.getElementById('balance-value').textContent, '99.51');
+  assert.equal(documentRef.getElementById('error-banner').hidden, false);
+});
+
+test('production page pins the verified Chart.js UMD build', () => {
+  const html = readFileSync(indexPath, 'utf8');
+  assert.match(html, /https:\/\/cdn\.jsdelivr\.net\/npm\/chart\.js@4\.5\.1\/dist\/chart\.umd\.min\.js/u);
+});
+
+test('chart controller reuses both chart instances and exposes recharge and load tooltips', () => {
+  const { controllerApi } = loadControllerRuntime();
+  const documentRef = makeFakeDocument();
+  const chartInstances = [];
+  class FakeChart {
+    constructor(canvas, config) {
+      this.canvas = canvas;
+      this.data = config.data;
+      this.options = config.options;
+      this.updateCount = 0;
+      chartInstances.push(this);
+    }
+
+    update(mode) {
+      this.lastUpdateMode = mode;
+      this.updateCount += 1;
+    }
+  }
+
+  const controller = controllerApi.createDashboardController({
+    document: documentRef,
+    Chart: FakeChart,
+  });
+  const core = loadCore();
+  const records = makeRecords(core, [
+    ['2026-08-28T16:00:00', 20],
+    ['2026-08-28T17:00:00', 68.7],
+    ['2026-08-28T18:00:00', 67.7],
+  ]);
+  const derived = core.deriveIntervals(records);
+
+  const first = controller.updateCharts(records, derived);
+
+  assert.equal(first.chartAvailable, true);
+  assert.equal(chartInstances.length, 2);
+  assert.equal(chartInstances[0].data.datasets.length, 2);
+  assert.equal(chartInstances[0].options.scales.y.beginAtZero, false);
+  assert.equal(chartInstances[0].data.datasets[1].data[1], 68.7);
+  assert.ok(Math.abs(chartInstances[1].data.datasets[0].data[0] - 1.3) < 1e-10);
+  assert.ok(
+    Array.from(chartInstances[1].options.plugins.tooltip.callbacks.label({ dataIndex: 0 }))
+      .some((line) => /平均负载：/u.test(line)),
+  );
+
+  controller.setRange('7d');
+
+  assert.equal(chartInstances.length, 2);
+  assert.equal(chartInstances[0].updateCount, 1);
+  assert.equal(chartInstances[1].updateCount, 1);
+  assert.equal(documentRef.getElementById('range-7d').ariaPressed, 'true');
+  assert.equal(documentRef.getElementById('range-24h').ariaPressed, 'false');
+  assert.equal(controller.setRange('all'), 'all');
+  assert.equal(chartInstances.length, 2);
 });

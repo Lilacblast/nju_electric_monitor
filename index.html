@@ -278,6 +278,7 @@
     <div class="footer-line"><p>数据来源：仓库静态 CSV · 每小时自动更新</p><p id="footer-note">非官方只读页面</p></div>
   </footer>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
   <script id="dashboard-core">
   (() => {
     'use strict';
@@ -760,6 +761,438 @@
       return error;
     }
 
+    const RANGE_ORDER = Object.freeze(['24h', '7d', '30d', 'all']);
+    const RANGE_HOURS = Object.freeze({ '24h': 24, '7d': 24 * 7, '30d': 24 * 30, all: null });
+    const REFRESH_INTERVAL_MS = 300000;
+
+    function rangeCutoffMs(range, anchorMs) {
+      const hours = RANGE_HOURS[range];
+      return Number.isFinite(hours) ? anchorMs - hours * 3600000 : Number.NEGATIVE_INFINITY;
+    }
+
+    function updateRangeButtons(documentRef, selectedRange) {
+      if (!documentRef) return;
+      RANGE_ORDER.forEach((range) => {
+        const button = getElement(documentRef, `range-${range}`);
+        if (!button) return;
+        const pressed = String(range === selectedRange);
+        if (typeof button.setAttribute === 'function') button.setAttribute('aria-pressed', pressed);
+        else button.ariaPressed = pressed;
+      });
+    }
+
+    function setChartSurface(documentRef, chartId, emptyId, ready, message) {
+      const canvas = getElement(documentRef, chartId);
+      const empty = getElement(documentRef, emptyId);
+      if (canvas) canvas.hidden = !ready;
+      if (empty) {
+        if (message) empty.textContent = message;
+        empty.hidden = ready;
+      }
+    }
+
+    function makeChartColors(documentRef) {
+      const root = documentRef?.documentElement;
+      if (root && typeof getComputedStyle === 'function') {
+        const styles = getComputedStyle(root);
+        return {
+          ink: styles.getPropertyValue('--ink').trim() || '#20231f',
+          muted: styles.getPropertyValue('--muted').trim() || '#71756e',
+          line: styles.getPropertyValue('--line').trim() || '#dedfd8',
+          green: styles.getPropertyValue('--green').trim() || '#2c7255',
+        };
+      }
+      return { ink: '#20231f', muted: '#71756e', line: '#dedfd8', green: '#2c7255' };
+    }
+
+    function createDashboardController(options = {}) {
+      const documentRef = options.document ?? (typeof document !== 'undefined' ? document : null);
+      const fetchImpl = options.fetch
+        ?? (typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null);
+      const ChartCtor = options.Chart ?? globalThis.Chart;
+      const setIntervalImpl = options.setInterval
+        ?? (typeof globalThis.setInterval === 'function' ? globalThis.setInterval.bind(globalThis) : null);
+      const clearIntervalImpl = options.clearInterval
+        ?? (typeof globalThis.clearInterval === 'function' ? globalThis.clearInterval.bind(globalThis) : null);
+      const nowImpl = typeof options.now === 'function' ? options.now : () => Date.now();
+      let selectedRange = '24h';
+      let records = [];
+      let intervals = [];
+      let model = null;
+      let skippedCount = 0;
+      let lineChart = null;
+      let barChart = null;
+      let refreshTimer = null;
+      let started = false;
+
+      function nowMs() {
+        const value = Number(nowImpl());
+        return Number.isFinite(value) ? value : Date.now();
+      }
+
+      function getAnchorMs(sourceRecords) {
+        const latest = sourceRecords?.at(-1);
+        return latest && Number.isFinite(latest.timeMs) ? latest.timeMs : nowMs();
+      }
+
+      function destroyCharts() {
+        [lineChart, barChart].forEach((chart) => {
+          if (chart && typeof chart.destroy === 'function') chart.destroy();
+        });
+        lineChart = null;
+        barChart = null;
+      }
+
+      function showChartFallback(message = '图表组件加载失败') {
+        setChartSurface(documentRef, 'balance-chart', 'balance-chart-empty', false, message);
+        setChartSurface(documentRef, 'consumption-chart', 'consumption-chart-empty', false, message);
+      }
+
+      function buildBalanceData(sourceRecords, sourceIntervals) {
+        const anchorMs = getAnchorMs(sourceRecords);
+        const cutoffMs = rangeCutoffMs(selectedRange, anchorMs);
+        const filteredRecords = sourceRecords.filter((record) => record.timeMs >= cutoffMs && record.timeMs <= anchorMs);
+        const rechargeByTime = new Map(
+          sourceIntervals
+            .filter((interval) => interval.rechargeEvent?.confidence === 'high')
+            .map((interval) => [interval.rechargeEvent.timeMs, interval.rechargeEvent]),
+        );
+        const labels = filteredRecords.map((record) => formatDateTime(record.timeMs));
+        const balance = filteredRecords.map((record) => record.balance);
+        const recharge = filteredRecords.map((record) => (
+          rechargeByTime.has(record.timeMs) ? record.balance : null
+        ));
+        return { anchorMs, filteredRecords, labels, balance, recharge, rechargeByTime };
+      }
+
+      function buildConsumptionData(sourceRecords, sourceIntervals) {
+        const anchorMs = getAnchorMs(sourceRecords);
+        const cutoffMs = anchorMs - 24 * 3600000;
+        const filteredIntervals = sourceIntervals.filter((interval) => (
+          interval.endTimeMs > cutoffMs
+          && interval.endTimeMs <= anchorMs
+          && Number.isFinite(interval.consumption)
+        ));
+        return {
+          filteredIntervals,
+          labels: filteredIntervals.map((interval) => formatDateTime(interval.endTimeMs)),
+          consumption: filteredIntervals.map((interval) => interval.consumption),
+        };
+      }
+
+      function makeLineConfig(data, colors) {
+        const lineTooltip = {
+          callbacks: {
+            title(items) {
+              return items[0] ? `北京时间 ${data.labels[items[0].dataIndex]}` : '';
+            },
+            label(context) {
+              if (context.datasetIndex === 1) {
+                const record = data.filteredRecords[context.dataIndex];
+                const event = record ? data.rechargeByTime.get(record.timeMs) : null;
+                return event
+                  ? `充值节点：+${formatBalance(event.estimatedRecharge)} 度`
+                  : '充值节点';
+              }
+              return `余额：${formatBalance(context.parsed.y)} 度`;
+            },
+          },
+        };
+        return {
+          type: 'line',
+          data: {
+            labels: data.labels,
+            datasets: [
+              {
+                label: '余额',
+                data: data.balance,
+                borderColor: colors.green,
+                backgroundColor: colors.green,
+                borderWidth: 2,
+                pointRadius: 2.5,
+                pointHoverRadius: 5,
+                tension: 0,
+                spanGaps: false,
+              },
+              {
+                label: '充值节点',
+                data: data.recharge,
+                borderColor: 'transparent',
+                backgroundColor: colors.green,
+                pointBackgroundColor: colors.green,
+                pointBorderColor: colors.green,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                showLine: false,
+                spanGaps: true,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            animation: false,
+            scales: {
+              x: {
+                grid: { color: colors.line },
+                ticks: { color: colors.muted, maxRotation: 0, autoSkip: true },
+              },
+              y: {
+                beginAtZero: false,
+                grid: { color: colors.line },
+                ticks: { color: colors.muted },
+              },
+            },
+            plugins: {
+              legend: { labels: { color: colors.ink, usePointStyle: true } },
+              tooltip: lineTooltip,
+            },
+          },
+        };
+      }
+
+      function makeBarConfig(data, colors) {
+        const barTooltip = {
+          callbacks: {
+            title(items) {
+              const interval = data.filteredIntervals[items[0]?.dataIndex];
+              return interval
+                ? `${formatDateTime(interval.startTimeMs)} — ${formatDateTime(interval.endTimeMs)}`
+                : '';
+            },
+            label(context) {
+              const interval = data.filteredIntervals[context.dataIndex];
+              if (!interval) return '';
+              return [
+                `耗电：${formatKWh(interval.consumption)}`,
+                `区间：${formatDuration(interval.hours)}`,
+                `平均负载：${formatPower(interval.averagePowerKW)}`,
+              ];
+            },
+          },
+        };
+        return {
+          type: 'bar',
+          data: {
+            labels: data.labels,
+            datasets: [{
+              label: '区间耗电',
+              data: data.consumption,
+              backgroundColor: colors.green,
+              borderColor: colors.green,
+              borderWidth: 0,
+              borderRadius: 3,
+              maxBarThickness: 38,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: { color: colors.muted, maxRotation: 0, autoSkip: true },
+              },
+              y: {
+                beginAtZero: true,
+                grid: { color: colors.line },
+                ticks: { color: colors.muted },
+              },
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: barTooltip,
+            },
+          },
+        };
+      }
+
+      function updateCharts(sourceRecords = records, sourceIntervals = intervals) {
+        if (Array.isArray(sourceRecords)) records = sourceRecords;
+        if (Array.isArray(sourceIntervals)) intervals = sourceIntervals;
+        const chartData = buildBalanceData(sourceRecords, sourceIntervals);
+        const consumptionData = buildConsumptionData(sourceRecords, sourceIntervals);
+        const enoughTrend = chartData.filteredRecords.length >= 2;
+        const enoughConsumption = consumptionData.filteredIntervals.length > 0;
+        updateRangeButtons(documentRef, selectedRange);
+
+        if (typeof ChartCtor !== 'function') {
+          showChartFallback();
+          return {
+            range: selectedRange,
+            trendRecords: chartData.filteredRecords,
+            consumptionIntervals: consumptionData.filteredIntervals,
+            chartAvailable: false,
+          };
+        }
+
+        const colors = makeChartColors(documentRef);
+        try {
+          const balanceCanvas = getElement(documentRef, 'balance-chart');
+          const consumptionCanvas = getElement(documentRef, 'consumption-chart');
+          if (!lineChart && enoughTrend && balanceCanvas) {
+            lineChart = new ChartCtor(balanceCanvas, makeLineConfig(chartData, colors));
+          } else if (lineChart) {
+            const next = makeLineConfig(chartData, colors);
+            lineChart.data.labels = next.data.labels;
+            lineChart.data.datasets[0].data = next.data.datasets[0].data;
+            lineChart.data.datasets[1].data = next.data.datasets[1].data;
+            lineChart.options.plugins.tooltip = next.options.plugins.tooltip;
+            lineChart.update('none');
+          }
+
+          if (!barChart && enoughConsumption && consumptionCanvas) {
+            barChart = new ChartCtor(consumptionCanvas, makeBarConfig(consumptionData, colors));
+          } else if (barChart) {
+            const next = makeBarConfig(consumptionData, colors);
+            barChart.data.labels = next.data.labels;
+            barChart.data.datasets[0].data = next.data.datasets[0].data;
+            barChart.options.plugins.tooltip = next.options.plugins.tooltip;
+            barChart.update('none');
+          }
+
+          setChartSurface(
+            documentRef,
+            'balance-chart',
+            'balance-chart-empty',
+            enoughTrend,
+            enoughTrend ? '' : '至少需要两次采样',
+          );
+          setChartSurface(
+            documentRef,
+            'consumption-chart',
+            'consumption-chart-empty',
+            enoughConsumption,
+            enoughConsumption ? '' : '暂无有效耗电区间',
+          );
+          return {
+            range: selectedRange,
+            trendRecords: chartData.filteredRecords,
+            consumptionIntervals: consumptionData.filteredIntervals,
+            chartAvailable: true,
+          };
+        } catch (error) {
+          destroyCharts();
+          showChartFallback();
+          return {
+            range: selectedRange,
+            trendRecords: chartData.filteredRecords,
+            consumptionIntervals: consumptionData.filteredIntervals,
+            chartAvailable: false,
+            error,
+          };
+        }
+      }
+
+      async function loadData() {
+        if (typeof fetchImpl !== 'function') throw new Error('fetch unavailable');
+        const response = await fetchImpl(`data/electricity_data.csv?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response || response.ok === false) throw new Error('CSV request failed');
+        if (typeof response.text !== 'function') throw new Error('CSV response is unreadable');
+        const text = await response.text();
+        const normalized = normalizeRecords(parseCsv(text));
+        const nextRecords = normalized.records;
+        const nextIntervals = deriveIntervals(nextRecords);
+        const timestamp = nowMs();
+        const nextModel = createDashboardModel(nextRecords, nextIntervals, timestamp, normalized.skippedCount);
+        const nextStats = nextRecords.length
+          ? calculateStats(nextRecords, nextIntervals, timestamp)
+          : { rechargeEvents: [], consumption24h: null };
+        return {
+          records: nextRecords,
+          intervals: nextIntervals,
+          model: nextModel,
+          stats: nextStats,
+          skippedCount: normalized.skippedCount,
+        };
+      }
+
+      async function refreshDashboard() {
+        try {
+          const next = await loadData();
+          records = next.records;
+          intervals = next.intervals;
+          model = next.model;
+          skippedCount = next.skippedCount;
+          renderDashboard(model, {
+            document: documentRef,
+            rechargeEvents: next.stats.rechargeEvents,
+            consumption24h: next.stats.consumption24h,
+          });
+          updateCharts(records, intervals);
+          const banner = getElement(documentRef, 'error-banner');
+          if (banner) {
+            banner.hidden = true;
+            banner.textContent = '';
+          }
+          return { ...next, preserved: false };
+        } catch (error) {
+          renderError(error, documentRef);
+          return {
+            error,
+            records,
+            intervals,
+            model,
+            preserved: records.length > 0 || model !== null,
+          };
+        }
+      }
+
+      function setRange(range) {
+        if (!RANGE_ORDER.includes(range)) return selectedRange;
+        selectedRange = range;
+        updateRangeButtons(documentRef, selectedRange);
+        if (records.length > 0 || intervals.length > 0) updateCharts(records, intervals);
+        return selectedRange;
+      }
+
+      function wireRangeControls() {
+        if (!documentRef) return;
+        RANGE_ORDER.forEach((range) => {
+          const button = getElement(documentRef, `range-${range}`);
+          if (button && typeof button.addEventListener === 'function') {
+            button.addEventListener('click', () => setRange(range));
+          }
+        });
+        updateRangeButtons(documentRef, selectedRange);
+      }
+
+      function start() {
+        if (started) return refreshTimer;
+        started = true;
+        wireRangeControls();
+        void refreshDashboard();
+        if (typeof setIntervalImpl === 'function') {
+          refreshTimer = setIntervalImpl(() => { void refreshDashboard(); }, REFRESH_INTERVAL_MS);
+        }
+        return refreshTimer;
+      }
+
+      function stop() {
+        if (refreshTimer !== null && typeof clearIntervalImpl === 'function') {
+          clearIntervalImpl(refreshTimer);
+        }
+        refreshTimer = null;
+        started = false;
+      }
+
+      return Object.freeze({
+        getState: () => ({ records, intervals, model, skippedCount, selectedRange }),
+        loadData,
+        refreshDashboard,
+        setRange,
+        start,
+        stop,
+        updateCharts,
+        ranges: RANGE_ORDER,
+        refreshIntervalMs: REFRESH_INTERVAL_MS,
+      });
+    }
+
+    const defaultController = createDashboardController();
+
     globalThis.NJUPowerCore = Object.freeze({
       calculateStats,
       createDashboardModel,
@@ -780,6 +1213,22 @@
       renderError,
       renderNoData,
     });
+    globalThis.NJUPowerController = Object.freeze({
+      createDashboardController,
+      getState: defaultController.getState,
+      loadData: defaultController.loadData,
+      refreshDashboard: defaultController.refreshDashboard,
+      setRange: defaultController.setRange,
+      start: defaultController.start,
+      stop: defaultController.stop,
+      updateCharts: defaultController.updateCharts,
+      ranges: RANGE_ORDER,
+      refreshIntervalMs: REFRESH_INTERVAL_MS,
+    });
+
+    if (typeof document !== 'undefined' && typeof globalThis.fetch === 'function') {
+      defaultController.start();
+    }
   })();
   </script>
 </body>
