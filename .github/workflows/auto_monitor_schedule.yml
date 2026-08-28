@@ -72,8 +72,6 @@ jobs:
     - name: Commit and push changes
       if: always()
       shell: bash
-      env:
-        GIT_UPDATE_TOKEN: ${{ secrets.GIT_UPDATE_TOKEN }}
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -89,9 +87,7 @@ jobs:
         git commit -m "Auto update: logs (run ${GITHUB_RUN_ID})" -q || echo "No logs changes to commit"
 
         # 使用 token 推送到当前分支
-        git remote set-url origin https://x-access-token:${GIT_UPDATE_TOKEN}@github.com/${{ github.repository }}.git
         git push origin "HEAD:$branch" || echo "Push failed"
-
     - name: Show latest wrapper log
       if: always()
       shell: bash
