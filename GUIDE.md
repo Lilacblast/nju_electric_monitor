@@ -254,7 +254,7 @@ python src/nju_electric_monitor_auto.py config.json
 
 项目已配置GitHub Actions工作流，会自动定时运行：
 
-- **触发时间**: 每天UTC 00:00, 08:00, 16:00（北京时间08:00, 16:00, 24:00）
+- **触发时间**: 计划每 5 分钟触发一次（GitHub Actions 可能因平台负载延迟）
 - **手动触发**: 在Actions页面点击 "Run workflow"
 - **运行结果**: 在Actions页面查看日志
 
@@ -720,7 +720,7 @@ A: 验证码图片质量、噪声、扭曲程度都会影响OCR识别。系统�
 A: 检查captcha-recognizer是否正确安装，查看canvas截图是否清晰。系统已实现多轮重试，单次失败会自动重试。
 
 **Q: 如何修改定时任务频率？**  
-A: 编辑 `.github/workflows/schedule.yml`，修改 `schedule` 部分的cron表达式。
+A: 编辑 `.github/workflows/auto_monitor_schedule.yml`，修改 `schedule` 部分的 cron 表达式。
 
 **Q: 数据文件太大怎么办？**  
 A: 可以定期清理旧数据，或修改代码只保留最近N天的数据。

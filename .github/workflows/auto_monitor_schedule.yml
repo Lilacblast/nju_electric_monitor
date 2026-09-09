@@ -2,11 +2,15 @@ name: Auto Monitor Schedule
 
 on:
   schedule:
-    - cron: "27 * * * *" # UTC 时间对应北京时间 9:00, 15:00, 21:00
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: auto-monitor-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   run-monitor:

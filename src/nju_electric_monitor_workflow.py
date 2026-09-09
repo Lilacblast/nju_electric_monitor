@@ -35,6 +35,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from epay_electricity import query_remaining_electricity, read_remaining_electricity, safe_url_for_log
 import logging
 from PIL import Image
 import io
@@ -1382,18 +1383,18 @@ class NJUElectricMonitor:
 
                 # 仍然停留在统一认证登录页，视为登录失败
                 if "authserver.nju.edu.cn" in lower_url and "login" in lower_url:
-                    self.logger.error(f"仍停留在统一认证登录页，当前 URL: {current_url}")
+                    self.logger.error(f"仍停留在统一认证登录页，当前 URL: {safe_url_for_log(current_url)}")
                     # 如果有验证码错误提示，也一并记录，方便排查
                     if self.has_captcha_error():
                         self.logger.error("登录失败可能由验证码错误导致")
                     return False
 
                 # 其他情况：可能跳转到了中间页面，记录但仍尝试继续
-                self.logger.info(f"页面已跳转到: {current_url}")
+                self.logger.info(f"页面已跳转到: {safe_url_for_log(current_url)}")
                 return True
 
             # 成功跳转到电费页面
-            self.logger.info(f"检测到已跳转到电费页面: {self.driver.current_url}")
+            self.logger.info(f"检测到已跳转到电费页面: {safe_url_for_log(self.driver.current_url)}")
             return True
                 
         except Exception as e:
@@ -1442,6 +1443,21 @@ class NJUElectricMonitor:
         except Exception as e:
             self.logger.error(f"点击充值按钮时出错: {e}")
             return False
+
+    def get_remaining_electricity(self):
+        """优先通过接口读取电量，失败时回退到充值页 DOM。"""
+        def query():
+            value = query_remaining_electricity(self.driver)
+            self.logger.info(f"通过 queryelectricbill 获取剩余电量: {value} 度")
+            return value
+
+        def fallback():
+            self.logger.warning("queryelectricbill 查询失败，回退到充值页解析")
+            if not self.click_recharge_button():
+                self.logger.warning("点击充值按钮失败，尝试在当前页面直接提取数据")
+            return self.extract_remaining_electricity()
+
+        return read_remaining_electricity(query, fallback)
     
     def extract_remaining_electricity(self):
         """提取剩余电量信息"""
@@ -2000,22 +2016,18 @@ class NJUElectricMonitor:
             # 测试模式：已通过统一认证并进入电费页面
             self.save_page_snapshot("06_login_success_electric_page")
             
-            # 8. 点击充值按钮
-            if not self.click_recharge_button():
-                self.logger.warning("点击充值按钮失败，尝试直接提取数据")
-            
-            # 9. 提取剩余电量
-            remaining_electricity = self.extract_remaining_electricity()
+            # 8. 优先调用余额接口，失败时回退到充值页 DOM
+            remaining_electricity = self.get_remaining_electricity()
 
             # 如果未能成功提取电量，视为本次流程失败（可能是验证码/登录异常导致未进入目标页面）
             if remaining_electricity is None:
                 self.logger.error("提取剩余电量失败，认为本次监控流程未成功，将交由上层重试")
                 return False
 
-            # 10. 保存数据
+            # 9. 保存数据
             self.save_data(remaining_electricity)
 
-            # 11. 根据电量阈值发送邮件提醒（如已配置）
+            # 10. 根据电量阈值发送邮件提醒（如已配置）
             self.send_email_alert_if_needed(remaining_electricity)
             
             self.logger.info("监控流程完成")
